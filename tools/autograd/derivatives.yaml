@@ -1554,6 +1554,15 @@
   self: slice_backward_wrapper(grad, self.sym_sizes(), dim, start, end, step)
   result: auto_linear
 
+- name: narrow_copy(Tensor self, int dim, SymInt start, SymInt length) -> Tensor
+  self: narrow_copy_backward_symint(grad, self.sym_sizes(), dim, start, length)
+  result: auto_linear
+
+- name: narrow_scatter(Tensor self, Tensor src, int dim, SymInt start, SymInt length) -> Tensor
+  self: narrow_scatter_symint(grad, zeros_like(src), dim, start, length)
+  src: grad.narrow_symint(dim, start, length)
+  result: auto_linear
+
 - name: slice_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
   grad_output: grad.slice_symint(dim, start, end, step)
   result: auto_linear

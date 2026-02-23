@@ -3669,6 +3669,33 @@ class TestAutograd(TestCase):
         expected[3:5] = v_expanded
         self.assertEqual(result, expected)
 
+    def test_narrow_copy_gradcheck(self):
+        # Test narrow_copy autograd support
+        x = torch.randn(10, 10, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: x.narrow_copy(0, 2, 5), (x,)))
+        self.assertTrue(gradcheck(lambda x: x.narrow_copy(1, 3, 4), (x,)))
+
+    def test_narrow_scatter_gradcheck(self):
+        # Test narrow_scatter autograd support
+        x = torch.randn(10, 10, dtype=torch.double, requires_grad=True)
+        src = torch.randn(5, 10, dtype=torch.double, requires_grad=True)
+        self.assertTrue(
+            gradcheck(lambda x, s: torch.narrow_scatter(x, s, 0, 2, 5), (x, src))
+        )
+
+        # Test that narrow_copy and narrow_scatter have matching gradients
+        x = torch.randn(10, 10, requires_grad=True)
+        y = x.narrow_copy(0, 2, 5).sum()
+        y.backward()
+        grad_copy = x.grad.clone()
+
+        x.grad.zero_()
+        z = x.narrow(0, 2, 5).sum()
+        z.backward()
+        grad_view = x.grad
+
+        self.assertEqual(grad_copy, grad_view)
+
     def test_unused_output(self):
         x = torch.randn(10, 10, requires_grad=True)
         outputs = x.chunk(5)

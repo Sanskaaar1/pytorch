@@ -158,6 +158,7 @@
 #include <ATen/ops/slice_copy_native.h>
 #include <ATen/ops/slice_inverse_native.h>
 #include <ATen/ops/slice_native.h>
+#include <ATen/ops/slice_scatter.h>
 #include <ATen/ops/slice_scatter_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
@@ -2363,6 +2364,18 @@ Tensor select_backward_symint(
     c10::SymInt index) {
   auto grad_input = at::zeros_symint(input_sizes, grad.options());
   grad_input.select_symint(dim, std::move(index)).copy_(grad);
+  return grad_input;
+}
+
+Tensor narrow_copy_backward_symint(
+    const Tensor& grad,
+    c10::SymIntArrayRef input_sizes,
+    int64_t dim,
+    c10::SymInt start,
+    c10::SymInt length) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
+  grad_input.narrow_symint(dim, std::move(start), std::move(length))
+      .copy_(grad);
   return grad_input;
 }
 
@@ -4887,6 +4900,19 @@ at::Tensor select_scatter_symint(
       slice.sizes());
   slice.copy_(src);
   return output;
+}
+at::Tensor narrow_scatter_symint(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    int64_t dim,
+    c10::SymInt start,
+    c10::SymInt length) {
+  // narrow_scatter is implemented using slice_scatter
+  // narrow_scatter(self, src, dim, start, length) is equivalent to
+  // slice_scatter(self, src, dim, start, start+length, step=1)
+  c10::SymInt end = start + length;
+  return at::slice_scatter_symint(
+      self, src, dim, std::make_optional(start), std::make_optional(end), 1);
 }
 at::Tensor diagonal_scatter(
     const at::Tensor& self,
