@@ -5784,6 +5784,24 @@ def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow, is_ref):
                          error_regex=r"start must be an 0-dim integral Tensor\.")
 
 
+def sample_inputs_narrow_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # (input_shape, src_shape, (dim, start, length))
+    # narrow_scatter(input, src, dim, start, length) where src.shape == input.narrow(dim, start, length).shape
+    cases = (((L, M, S), (L // 2, M, S), (0, L // 4, L // 2)),
+             ((L, M, S), (1, M, S), (0, L // 2, 1)),
+             ((L, M, S), (L, M // 2, S), (1, M // 4, M // 2)),
+             ((L, M, S), (L, M, S // 2), (2, S // 4, S // 2)),
+             ((L, M, S), (L, M, S), (0, 0, L)),
+             )
+
+    for input_shape, src_shape, args in cases:
+        input_ = make_arg(input_shape)
+        src = make_arg(src_shape)
+        yield SampleInput(input_, args=(src, *args))
+
+
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
     y_shape_x_shape_and_kwargs = [
         ((2, 3), (2, 3), {}),
@@ -18037,10 +18055,10 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('narrow_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           backward_dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=True,
-           supports_forward_ad=False,
-           supports_fwgrad_bwgrad=False,
-           supports_autograd=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/86931
            sample_inputs_func=partial(sample_inputs_narrow_narrow_copy, is_narrow=False),
            reference_inputs_func=partial(reference_inputs_narrow_narrow_copy, is_narrow=False),
@@ -18049,6 +18067,16 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # narrow_copy doesn't support complex autograd (fundamental PyTorch limitation)
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                            dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view',
+                            dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view',
+                            dtypes=(torch.complex32, torch.complex64, torch.complex128)),
                # Could not run 'aten::narrow_copy.out' with arguments from the 'CUDA' backend
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
                             device_type='cuda'),
@@ -18057,6 +18085,27 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                             device_type='cuda'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
+           )),
+    OpInfo('narrow_scatter',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           backward_dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_narrow_scatter,
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
+           skips=(
+               # narrow_scatter doesn't support complex autograd (fundamental PyTorch limitation)
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                            dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view',
+                            dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view',
+                            dtypes=(torch.complex32, torch.complex64, torch.complex128)),
            )),
     OpInfo('view_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
