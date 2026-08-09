@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    HardwareClassification,
     IS_FBCODE,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -73,6 +74,8 @@ class RandomDatasetMock(torch.utils.data.Dataset):
 
 
 class TestCheckpoint(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # This runs checkpoint_sequential on each of the nets in
     # module_lists_to_compare, and compares them against the uncheckpointed model.
     # To compare, it checks outputs as well as input gradients and parameter gradients
@@ -398,20 +401,23 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator")
-    def test_checkpointing_without_reentrant_early_free(self):
-        _acc = torch.accelerator.current_accelerator()
-        if _acc is None:
-            self.skipTest("current_accelerator() not supported")
+    def test_infer_device_state_recursive_meta(self):
+        inp = {"foo": torch.rand(10, device="meta")}
+        device_type = _infer_device_type(inp)
+        self.assertEqual("meta", device_type)
 
-        _device_type = _acc.type
 
+class TestCheckpointDeviceType(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_checkpointing_without_reentrant_early_free(self, device):
         # Functional check: verify memory tracking actually works on this backend
-        test_tensor = torch.zeros(1024, device=_device_type)
+        test_tensor = torch.zeros(1024, device=device)
         torch.accelerator.synchronize()
         if torch.accelerator.memory_allocated() == 0:
             del test_tensor
-            self.skipTest(f"{_device_type} does not support memory_allocated tracking")
+            self.skipTest(f"{device} does not support memory_allocated tracking")
         del test_tensor
 
         def _do_test(fn, should_free):
@@ -419,14 +425,16 @@ class TestCheckpoint(TestCase):
 
             def track(x, idx):
                 def hook(_unused):
-                    self.assertEqual(len(stats), idx)
+                    # Use plain assert inside hooks to avoid DeviceTypeTestBase
+                    # TLS rel_tol access in non-main thread context
+                    assert len(stats) == idx
                     torch.accelerator.synchronize()
                     stats.append(torch.accelerator.memory_allocated())
                     if idx > 0:
                         if should_free:
-                            self.assertLess(stats[idx], stats[idx - 1])
+                            assert stats[idx] < stats[idx - 1]
                         else:
-                            self.assertEqual(stats[idx], stats[idx - 1])
+                            assert stats[idx] == stats[idx - 1]
 
                 x.register_hook(hook)
 
@@ -444,7 +452,7 @@ class TestCheckpoint(TestCase):
 
             return stats
 
-        x = torch.zeros(10, device=_device_type, requires_grad=True)
+        x = torch.zeros(10, device=device, requires_grad=True)
         x.grad = torch.zeros_like(x)
 
         non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
@@ -467,13 +475,6 @@ class TestCheckpoint(TestCase):
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
         self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
-    def test_infer_device_state_recursive_meta(self):
-        inp = {"foo": torch.rand(10, device="meta")}
-        device_type = _infer_device_type(inp)
-        self.assertEqual("meta", device_type)
-
-
-class TestCheckpointDeviceType(TestCase):
     @onlyAccelerator
     def test_checkpoint_rng_accelerator(self, device):
         for _ in range(5):
@@ -593,6 +594,7 @@ instantiate_device_type_tests(
 
 
 class TestDataLoaderUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     MAX_TIMEOUT_IN_SECOND = 300
 
     @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/84937")
@@ -670,17 +672,23 @@ from torch.utils.collect_env import get_pretty_env_info
 
 @unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
 
 
 class TestHipify(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
 
 class TestHipifyTrie(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         from torch.utils.hipify import hipify_python
@@ -753,6 +761,8 @@ class TestHipifyTrie(TestCase):
 
 
 class TestAssert(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_assert_true(self):
         # verify assertions work as expected
         # bool argument
@@ -782,6 +792,8 @@ class TestAssert(TestCase):
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # The standalone binary cannot resolve librocprofiler-sdk.so.1 in CI.
     @skipIfRocmVersionAtLeast([7, 14])
     def test_load_standalone(self):
@@ -839,6 +851,8 @@ class TestStandaloneCPPJIT(TestCase):
 
 
 class TestRenderUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         self.assertExpectedInline(
             torch._utils.render_call(torch.sum, [torch.randn(100)], {"dim": 0}),
@@ -851,6 +865,8 @@ class TestRenderUtils(TestCase):
 
 
 class TestDeviceUtils(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_basic(self):
         with torch.device("meta") as dev:
             x = torch.empty(3, 3)
@@ -964,6 +980,8 @@ instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
 class TestCppExtensionUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
 
@@ -972,6 +990,8 @@ class TestCppExtensionUtils(TestCase):
 
 
 class TestTraceback(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         source = """\
 def f(x):
@@ -1022,6 +1042,8 @@ def f(x):
 
 
 class TestTryImport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_import_imported(self):
         self.assertIn("os", sys.modules)
         os_module = try_import("os")
@@ -1040,6 +1062,8 @@ class TestTryImport(TestCase):
 
 
 class TestUtilsInternal(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
         def nvsmi(_query):
             raise FileNotFoundError("nvidia-smi")
@@ -1096,6 +1120,8 @@ def _deprecated_api(x, y=15):
 
 
 class TestDeprecate(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_deprecated(self):
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
             # pyrefly: ignore [unknown-name]
@@ -1108,6 +1134,8 @@ class TestDeprecate(TestCase):
 
 
 class TestDeviceLazyInit(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(IS_WINDOWS, "pthread_atfork not available on Windows")
     def test_fork_poison_on_lazy_init(self, device):
         torch.empty(1, device=device)
@@ -1139,6 +1167,8 @@ instantiate_device_type_tests(
 
 
 class TestEnv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_getenv_matches_os(self):
         for name in ("PATH", "PATH_DOES_NOT_EXIST_TORCH_TEST"):
             self.assertEqual(torch._utils.getenv(name), os.environ.get(name))
