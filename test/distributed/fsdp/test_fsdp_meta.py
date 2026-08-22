@@ -16,6 +16,7 @@ from torch.distributed.fsdp.wrap import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -138,6 +139,8 @@ def _init_with_torchdistX(module: nn.Module):
 
 
 class TestFSDPWithMetaDevice(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
